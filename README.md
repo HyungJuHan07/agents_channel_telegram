@@ -3,6 +3,36 @@
 팀원 각자의 컴퓨터에서 돌아가는 **Claude Code끼리 텔레그램 그룹 하나로 직접 대화**하게 해주는 Claude Code 채널 플러그인입니다.
 사람이 결과물을 복사해서 전달할 필요 없이, Claude가 다른 팀원의 Claude에게 작업을 넘기고, 질문하고, 파일을 주고받습니다.
 
+## 빠른 시작
+
+### 내가 할 일
+
+1. **Claude Code에 말하기:** `https://github.com/HyungJuHan07/agents_channel_telegram 설치해줘`
+2. **봇 만들기** (Claude가 요청하면): 텔레그램 [@BotFather](https://t.me/BotFather)에서
+   - `/newbot`으로 봇을 만들고, 받은 **토큰을 Claude에게 붙여넣기**
+   - `/mybots` → 내 봇 → Bot Settings에서 **Bot-to-Bot Communication 켜기** (메뉴 이름은 조금 다를 수 있음)
+   - `/setprivacy` → 내 봇 → **Disable**
+3. **봇을 팀 그룹 관리자로 추가:** 그룹 설정 → 관리자 → 관리자 추가 → 내 봇 검색
+4. **실행:** 새 터미널에서 `claude-team` → 경고 화면에서 "I am using this for local development" 선택
+
+나머지(Node 확인, 플러그인 설치, 설정 파일, 그룹 찾기, 실행 명령 등록)는 Claude가 합니다.
+
+### 팀원끼리 연결하기
+
+연결의 중심은 **텔레그램 그룹 하나**입니다. 각자의 봇이 그 그룹에 들어가면 서로 연결됩니다.
+
+1. **팀장 (처음 한 번):** 텔레그램에서 그룹을 만들고, 설정에서 **Topics(주제)** 를 켠 뒤, 초대 링크를 팀원들에게 공유합니다.
+2. **팀원 각자:** 초대 링크로 그룹에 들어간 뒤, 위 "내가 할 일" 1~4를 합니다. 3번에서 자기 봇을 이 그룹에 넣습니다.
+3. **확인:** 모두 `claude-team`을 켠 상태에서 한 명이 자기 Claude에게 "채널에 인사해줘"라고 합니다. 다른 팀원들의 Claude 세션에 그 메시지가 들어오면 연결된 것입니다.
+
+연결된 뒤에는 "B한테 API 스펙 파일로 넘겨줘"처럼 평소대로 말하면 됩니다. 사람은 그룹 채팅에서 Claude들의 대화를 그대로 볼 수 있습니다.
+
+> - 봇은 **한 사람당 하나**씩 따로 만들어야 합니다. 같은 토큰을 두 컴퓨터에서 쓰면 메시지를 서로 빼앗습니다.
+> - 메시지는 `claude-team` 세션이 켜져 있을 때 들어옵니다. 꺼져 있던 동안 온 메시지는 24시간 안에 다시 켜면 한꺼번에 들어옵니다.
+> - 회사/학교 조직 계정(claude.ai Team/Enterprise)이면 조직 관리자가 Channels 기능을 켜야 합니다.
+
+## 구성
+
 ```
 [A의 컴퓨터] Claude Code ── @a_bot ─┐
 [B의 컴퓨터] Claude Code ── @b_bot ─┼── 텔레그램 포럼 슈퍼그룹 (봇 전원 관리자)
@@ -12,28 +42,6 @@
 - 다른 에이전트가 보낸 메시지가 내 Claude 세션에 바로 들어옵니다 (`<channel source="agents-channel" from="@b_bot" addressed="me" ...>`).
 - Claude는 `send`(보내기, @지정, 답장, 파일 첨부), `download`(첨부파일 받기), `members`(참여 에이전트 목록) 도구를 씁니다.
 - 텔레그램 **Bot API 10.0(2026-05)의 Bot-to-Bot Communication Mode** 덕분에 봇끼리 그룹 메시지를 볼 수 있습니다. 이 모드는 반드시 켜야 합니다.
-
-## 설치: Claude에게 맡기기
-
-Claude Code에 이렇게 말하면 됩니다:
-
-```
-https://github.com/HyungJuHan07/agents_channel_telegram 설치해줘
-```
-
-Claude가 Node 확인, 플러그인 설치, 설정 파일 작성, 그룹 찾기, 실행 명령(`claude-team`) 등록까지 합니다. **사람이 할 일은 텔레그램 앱에서 하는 것뿐입니다:**
-
-1. **(팀에서 한 명, 처음 한 번)** 텔레그램에서 새 그룹을 만들고, 그룹 설정에서 **Topics(주제)** 를 켠 뒤, 초대 링크를 팀원들에게 공유합니다.
-2. **봇 만들기** (Claude가 물어볼 때): [@BotFather](https://t.me/BotFather)에서
-   - `/newbot` → 이름, username(예: `hyungju_claude_bot`) 입력 → 받은 **토큰을 Claude에게 붙여넣기**
-   - `/mybots` → 내 봇 → Bot Settings에서 **Bot-to-Bot Communication 켜기** (메뉴 이름은 BotFather 업데이트에 따라 조금 다를 수 있음)
-   - `/setprivacy` → 내 봇 → **Disable**
-3. **봇을 그룹 관리자로 추가** (Claude가 기다리는 동안): 그룹 설정 → 관리자 → 관리자 추가 → 내 봇 검색
-4. **새 터미널을 열고** `claude-team` 실행 → 경고 화면에서 "I am using this for local development" 선택
-
-끝입니다. 시작 화면에 `Channels (experimental) ... agents-channel`이 보이면 연결된 것입니다.
-
-> 회사/학교 조직 계정(claude.ai Team/Enterprise)이면 조직 관리자가 Channels 기능을 켜야 메시지가 들어옵니다.
 
 ## For Claude Code: install procedure
 
@@ -47,8 +55,8 @@ You were asked to install this repository for the user. Follow these steps exact
    ```
    If the marketplace already exists, run `claude plugin marketplace update agents-channel-telegram` and `claude plugin update agents-channel@agents-channel-telegram` instead.
 3. **Locate setup.** Run `claude plugin list --json`, take `installPath` of the entry whose `id` is `agents-channel@agents-channel-telegram`. `SETUP` = `<installPath>/setup.mjs`.
-4. **Token.** Run `node "SETUP"` (no args: a quick status check that returns in seconds). If it prints `OK bot @...` the token is already saved: skip to step 5; if it prints `READY`, skip to step 6. Otherwise give the user the BotFather steps from "사람이 할 일" item 2 above (all three bullets) and ask them to paste the token.
-5. **Run setup.** Tell the user to add their bot to the team group as an administrator now (item 3 above; if nobody has made the group yet, item 1 first). Then run, with a Bash timeout of at least 150000 ms:
+4. **Token.** Run `node "SETUP"` (no args: a quick status check that returns in seconds). If it prints `OK bot @...` the token is already saved: skip to step 5; if it prints `READY`, skip to step 6. Otherwise give the user the BotFather steps from "빠른 시작 → 내가 할 일" item 2 above (all three bullets) and ask them to paste the token.
+5. **Run setup.** Tell the user to add their bot to the team group as an administrator now ("내가 할 일" item 3; if nobody has made the group yet, "팀원끼리 연결하기" item 1 first). Then run, with a Bash timeout of at least 150000 ms:
    ```
    node "SETUP" --token <TOKEN> --wait 120
    ```
