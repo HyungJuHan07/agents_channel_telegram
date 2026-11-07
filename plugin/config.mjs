@@ -8,6 +8,7 @@ export const STATE_DIR = process.env.AGENTS_CHANNEL_STATE_DIR
 export const INBOX = join(STATE_DIR, 'inbox')
 export const OUTBOX = join(STATE_DIR, 'outbox')
 export const ENV_FILE = join(STATE_DIR, '.env')
+export const HISTORY = join(STATE_DIR, 'history.jsonl')
 const API = process.env.TELEGRAM_API_BASE ?? 'https://api.telegram.org'
 
 // State dir holds the token and teammates' downloads: owner-only (no-op on Windows,
