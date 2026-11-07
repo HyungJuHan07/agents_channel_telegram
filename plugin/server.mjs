@@ -17,52 +17,23 @@
  * sessions with the plugin enabled don't consume group messages and throw them away.
  */
 import { createInterface } from 'node:readline'
-import { readFileSync, writeFileSync, mkdirSync, statSync, realpathSync, chmodSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { readFileSync, writeFileSync, statSync, realpathSync } from 'node:fs'
 import { join, basename, sep } from 'node:path'
+import { INBOX, OUTBOX, ENV_FILE, ensureStateDirs, readEnvFile, botApi, fileUrl } from './config.mjs'
 
-const STATE_DIR = process.env.AGENTS_CHANNEL_STATE_DIR
-  ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'channels', 'agents-channel')
-const INBOX = join(STATE_DIR, 'inbox')
-const OUTBOX = join(STATE_DIR, 'outbox')
-const ENV_FILE = join(STATE_DIR, '.env')
-const NOT_CONFIGURED = `not configured: set TELEGRAM_BOT_TOKEN and AGENTS_CHAT_ID in ${ENV_FILE}`
-
-// State dir holds the token and teammates' downloads: owner-only.
-for (const d of [STATE_DIR, INBOX, OUTBOX]) { mkdirSync(d, { recursive: true, mode: 0o700 }); chmodSync(d, 0o700) }
-
-try {
-  chmodSync(ENV_FILE, 0o600)
-  const raw = readFileSync(ENV_FILE)
-  // Windows PowerShell 5.1 `"..." > .env` writes UTF-16LE with a BOM.
-  const text = raw[0] === 0xff && raw[1] === 0xfe ? raw.toString('utf16le') : raw.toString('utf8')
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*(\w+)\s*=\s*(.*?)\s*$/)
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2]
-  }
-} catch {}
+const NOT_CONFIGURED = `not configured: set TELEGRAM_BOT_TOKEN and AGENTS_CHAT_ID in ${ENV_FILE} (or run setup.mjs)`
+ensureStateDirs()
+for (const [k, v] of Object.entries(readEnvFile())) process.env[k] ??= v // real env wins
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const CHAT_ID = process.env.AGENTS_CHAT_ID
 const TOPIC_ID = process.env.AGENTS_TOPIC_ID ? Number(process.env.AGENTS_TOPIC_ID) : undefined
 const ALLOWED = new Set((process.env.ALLOWED_SENDER_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean))
-const API = process.env.TELEGRAM_API_BASE ?? 'https://api.telegram.org'
 const POLL = process.env.AGENTS_CHANNEL_POLL?.trim() === '1' // trim: cmd.exe `set X=1 && ...` keeps the space
 const MAX_TEXT = 4096
 const MAX_UPLOAD = 50 * 1024 * 1024
 const log = (...a) => console.error('[agents-channel]', ...a)
-
-async function tg(method, body) {
-  const isForm = body instanceof FormData
-  const res = await fetch(`${API}/bot${TOKEN}/${method}`, {
-    method: 'POST',
-    headers: isForm ? undefined : { 'content-type': 'application/json' },
-    body: isForm ? body : JSON.stringify(body ?? {}),
-  })
-  const j = await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }))
-  if (!j.ok) throw Object.assign(new Error(`${method}: ${j.description}`), { code: j.error_code })
-  return j.result
-}
+const tg = botApi(TOKEN)
 
 // Attribute values go inside <channel ... k="v">; strip anything that could break the tag.
 const clean = s => String(s ?? '').replace(/[<>\[\]\r\n;"]/g, '_')
@@ -142,7 +113,7 @@ async function send({ text = '', to = [], reply_to, files = [] }) {
 
 async function download({ file_id }) {
   const f = await tg('getFile', { file_id }) // Bot API refuses files over 20MB here
-  const res = await fetch(`${API}/file/bot${TOKEN}/${f.file_path}`)
+  const res = await fetch(fileUrl(TOKEN, f.file_path))
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
   const out = join(INBOX, `${Date.now()}-${basename(f.file_path).replace(/[^\w.-]/g, '_')}`)
   writeFileSync(out, Buffer.from(await res.arrayBuffer()), { mode: 0o600 })

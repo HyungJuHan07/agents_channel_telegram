@@ -2,16 +2,18 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createServer } from 'node:http'
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, symlinkSync, mkdirSync } from 'node:fs'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, delimiter } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 
 const WIN = process.platform === 'win32' // no POSIX modes; symlinks need admin
 
 const CHAT = -1001
-const ME = { id: 10, is_bot: true, username: 'alice_bot', first_name: 'Alice' }
+const ME = { id: 10, is_bot: true, username: 'alice_bot', first_name: 'Alice', can_read_all_group_messages: true }
 const BOB = { id: 20, is_bot: true, username: 'bob_bot', first_name: 'Bob' }
 const queue = [], calls = []
 let nextId = 1000
@@ -31,12 +33,39 @@ const tg = createServer(async (req, res) => {
   }
   if (method === 'sendMessage' && body.text.includes('FAIL')) return res.end(JSON.stringify({ ok: false, description: 'Bad Request: boom' }))
   if (method === 'sendMessage' || method === 'sendDocument') return ok({ message_id: nextId++ })
+  if (method === 'getChat' && body.chat_id === -555) return res.end(JSON.stringify({ ok: false, error_code: 400, description: 'Bad Request: group chat was upgraded to a supergroup chat', parameters: { migrate_to_chat_id: CHAT } }))
+  if (method === 'getChat') return ok({ id: CHAT, type: 'supergroup', title: 'Team', is_forum: true })
+  if (method === 'getChatMember') return ok({ status: 'administrator', user: ME })
   if (method === 'getFile') return ok({ file_path: 'documents/plan.md' })
   // Real API omits other bots unless return_bots is set.
   if (method === 'getChatAdministrators') return ok(body.return_bots ? [{ user: ME }, { user: BOB }] : [{ user: ME }])
   res.end(JSON.stringify({ ok: false, description: 'unknown ' + method }))
 }).listen(0)
 await new Promise(r => tg.once('listening', r))
+
+// --- setup.mjs: token -> .env, launcher next to `claude`, group auto-detected from "bot added" update
+{
+  const sstate = mkdtempSync(join(tmpdir(), 'agents-channel-setup-'))
+  const bin = join(sstate, 'bin'); mkdirSync(bin)
+  writeFileSync(join(bin, WIN ? 'claude.exe' : 'claude'), '')
+  queue.push({ my_chat_member: { chat: { id: CHAT, type: 'supergroup', title: 'Team' }, new_chat_member: { status: 'administrator', user: ME } } })
+  const run = args => promisify(execFile)(process.execPath, [fileURLToPath(new URL('./setup.mjs', import.meta.url)), ...args], {
+    env: { ...process.env, PATH: bin + delimiter + process.env.PATH, AGENTS_CHANNEL_STATE_DIR: join(sstate, 'state'), TELEGRAM_API_BASE: `http://127.0.0.1:${tg.address().port}` },
+  })
+  const { stdout } = await run(['--token', '123:abc', '--wait', '5'])
+  assert.match(stdout, /READY/, stdout)
+  const envText = readFileSync(join(sstate, 'state', '.env'), 'utf8')
+  assert.match(envText, /TELEGRAM_BOT_TOKEN=123:abc/)
+  assert.match(envText, new RegExp(`AGENTS_CHAT_ID=${CHAT}`))
+  assert.match(readFileSync(join(bin, WIN ? 'claude-team.cmd' : 'claude-team'), 'utf8'), /AGENTS_CHANNEL_POLL=1.*--dangerously-load-development-channels plugin:agents-channel@agents-channel-telegram/s)
+  // re-run with nothing to wait for is a quick status check
+  assert.match((await run([])).stdout, /READY/)
+  // a stale basic-group id (Topics turned on since) follows migrate_to_chat_id
+  const migrated = await run(['--chat=-555'])
+  assert.match(migrated.stdout, new RegExp(`\\(${CHAT}\\) saved`), migrated.stdout)
+  await assert.rejects(run(['--token', 'nope']), e => e.code === 1 && /no valid bot token/.test(e.stdout))
+  calls.length = 0
+}
 
 const state = mkdtempSync(join(tmpdir(), 'agents-channel-'))
 // Written the way Windows PowerShell 5.1 `>` does it: UTF-16LE + BOM, CRLF.

@@ -13,13 +13,82 @@
 - Claude는 `send`(보내기, @지정, 답장, 파일 첨부), `download`(첨부파일 받기), `members`(참여 에이전트 목록) 도구를 씁니다.
 - 텔레그램 **Bot API 10.0(2026-05)의 Bot-to-Bot Communication Mode** 덕분에 봇끼리 그룹 메시지를 볼 수 있습니다. 이 모드는 반드시 켜야 합니다.
 
-## 요구 사항
+## 설치: Claude에게 맡기기
 
-- Channels 기능을 지원하는 Claude Code (v2.1.319에서 개발), claude.ai 로그인 또는 Console API 키 (Team/Enterprise 조직이면 관리자가 Channels를 켜야 함)
-- Node.js 20 이상 (외부 패키지 설치 없음: `node server.mjs` 하나로 실행). Claude Code가 Node를 같이 깔아주지 않으므로 따로 설치해야 합니다.
-  - Windows: `winget install OpenJS.NodeJS.LTS` 실행 후 **새 터미널**을 엽니다. `node -v`로 확인하세요.
-  - macOS: `brew install node`
-- Windows, macOS, Linux. 실행은 터미널의 `claude` CLI에서 합니다 (VS Code 확장에서는 채널 플래그를 줄 수 없습니다).
+Claude Code에 이렇게 말하면 됩니다:
+
+```
+https://github.com/HyungJuHan07/agents_channel_telegram 설치해줘
+```
+
+Claude가 Node 확인, 플러그인 설치, 설정 파일 작성, 그룹 찾기, 실행 명령(`claude-team`) 등록까지 합니다. **사람이 할 일은 텔레그램 앱에서 하는 것뿐입니다:**
+
+1. **(팀에서 한 명, 처음 한 번)** 텔레그램에서 새 그룹을 만들고, 그룹 설정에서 **Topics(주제)** 를 켠 뒤, 초대 링크를 팀원들에게 공유합니다.
+2. **봇 만들기** (Claude가 물어볼 때): [@BotFather](https://t.me/BotFather)에서
+   - `/newbot` → 이름, username(예: `hyungju_claude_bot`) 입력 → 받은 **토큰을 Claude에게 붙여넣기**
+   - `/mybots` → 내 봇 → Bot Settings에서 **Bot-to-Bot Communication 켜기** (메뉴 이름은 BotFather 업데이트에 따라 조금 다를 수 있음)
+   - `/setprivacy` → 내 봇 → **Disable**
+3. **봇을 그룹 관리자로 추가** (Claude가 기다리는 동안): 그룹 설정 → 관리자 → 관리자 추가 → 내 봇 검색
+4. **새 터미널을 열고** `claude-team` 실행 → 경고 화면에서 "I am using this for local development" 선택
+
+끝입니다. 시작 화면에 `Channels (experimental) ... agents-channel`이 보이면 연결된 것입니다.
+
+> 회사/학교 조직 계정(claude.ai Team/Enterprise)이면 조직 관리자가 Channels 기능을 켜야 메시지가 들어옵니다.
+
+## For Claude Code: install procedure
+
+You were asked to install this repository for the user. Follow these steps exactly; talk to the user in their language. Never echo the bot token back or write it anywhere except via `setup.mjs`.
+
+1. **Node 20+.** Run `node -v`. If missing or older, ask the user, then install it (Windows: `winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements`; macOS: `brew install node`). In this session the new PATH may not be visible yet: on Windows use `"C:\Program Files\nodejs\node.exe"` in place of `node` below.
+2. **Plugin.** Run:
+   ```
+   claude plugin marketplace add HyungJuHan07/agents_channel_telegram
+   claude plugin install agents-channel@agents-channel-telegram
+   ```
+   If the marketplace already exists, run `claude plugin marketplace update agents-channel-telegram` and `claude plugin update agents-channel@agents-channel-telegram` instead.
+3. **Locate setup.** Run `claude plugin list --json`, take `installPath` of the entry whose `id` is `agents-channel@agents-channel-telegram`. `SETUP` = `<installPath>/setup.mjs`.
+4. **Token.** Run `node "SETUP"` (no args: a quick status check that returns in seconds). If it prints `OK bot @...` the token is already saved: skip to step 5; if it prints `READY`, skip to step 6. Otherwise give the user the BotFather steps from "사람이 할 일" item 2 above (all three bullets) and ask them to paste the token.
+5. **Run setup.** Tell the user to add their bot to the team group as an administrator now (item 3 above; if nobody has made the group yet, item 1 first). Then run, with a Bash timeout of at least 150000 ms:
+   ```
+   node "SETUP" --token <TOKEN> --wait 120
+   ```
+   (Omit `--token` on re-runs; it is saved. Setup's own hints say `node setup.mjs`: always run it as `node "SETUP"`. To pick a group by id, use `--chat=<id>` with the `=`, since ids are negative.) Read the output:
+   - `OK` lines: done. `NOTE` lines: relay to the user.
+   - `ACTION` lines: something only the user can do in Telegram. Relay each one plainly, wait for them to say it's done, then re-run `node "SETUP" --wait 120`.
+   - `ERROR` lines: fix what it says (e.g. a 409 means a `claude-team` session is already running with this bot: ask the user to close it) and re-run.
+   - Exit code 0 with `READY`: go to step 6.
+6. **Finish.** Tell the user: open a **new** terminal and run `claude-team`, choose "I am using this for local development" on the warning screen. Then, in that session, ask Claude to post a hello to the channel to confirm teammates' agents can see it. Mention: the Bot-to-Bot Communication setting can't be verified by setup, so if other agents don't see each other's messages, re-check it in @BotFather.
+
+## 수동 설치
+
+Claude 없이 직접 하려면 위 "For Claude Code" 절차의 명령을 그대로 실행하면 됩니다: 플러그인 설치 → `claude plugin list --json`으로 경로 확인 → `node "<installPath>/setup.mjs" --token <토큰>`. `setup.mjs`가 설정 파일(`~/.claude/channels/agents-channel/.env`)과 `claude-team` 실행 명령을 만들어 줍니다.
+
+`.env`에 직접 넣을 수 있는 선택 항목:
+
+```
+# 이 토픽만 듣고 이 토픽에만 보냄
+AGENTS_TOPIC_ID=42
+# 이 텔레그램 ID들의 메시지만 받음 (봇/사람 ID, 쉼표 구분). 비우면 그룹 멤버 전체
+ALLOWED_SENDER_IDS=111111,222222
+```
+
+`claude-team`은 `AGENTS_CHANNEL_POLL=1`을 켜고 `claude --dangerously-load-development-channels plugin:agents-channel@agents-channel-telegram`을 실행하는 짧은 스크립트입니다. 이 값을 켠 세션만 그룹 메시지를 받습니다. 플러그인은 모든 Claude 세션에 켜지므로, 평소 세션이 메시지를 가져가서 버리는 일을 막기 위한 것입니다.
+
+> 메시지는 `claude-team` 세션이 켜져 있을 때만 들어옵니다. 꺼져 있던 동안 온 메시지는 텔레그램이 최대 24시간 보관했다가 다시 켜면 전달합니다.
+
+### 업데이트
+
+```
+claude plugin marketplace update agents-channel-telegram
+claude plugin update agents-channel@agents-channel-telegram
+```
+
+그다음 `claude-team`을 다시 실행합니다.
+
+### 요구 사항
+
+- Claude Code (v2.1.319에서 개발), claude.ai 로그인 또는 Console API 키. 실행은 터미널의 `claude` CLI에서 합니다 (VS Code 확장에서는 채널 플래그를 줄 수 없습니다).
+- Node.js 20 이상 (외부 패키지 없음). Windows, macOS, Linux.
 - 팀원 **1명당 봇 1개** (토큰 하나를 여러 컴퓨터가 같이 쓰면 409 Conflict로 메시지를 서로 빼앗습니다)
 
 ## 작동 방식
@@ -37,108 +106,6 @@
 5. 다른 팀원의 `server.mjs`가 같은 방식으로 그 메시지를 받아 그쪽 Claude에게 전달합니다. 사람은 그룹에서 대화를 그대로 지켜볼 수 있습니다.
 
 봇이 다른 봇의 메시지를 볼 수 있는 건 텔레그램 Bot API 10.0의 Bot-to-Bot 모드 덕분이라, 모든 봇에서 이 모드를 켜고 관리자로 넣어야 합니다.
-
-## 1. 그룹 만들기 (한 명이 한 번만)
-
-1. 텔레그램에서 새 그룹을 만들고 설정에서 **Topics(주제)** 를 켭니다. 그러면 포럼 슈퍼그룹이 됩니다. 프로젝트별로 토픽을 나눠 쓸 수 있습니다.
-2. 그룹 ID(`-100…`)를 확인합니다. [@RawDataBot](https://t.me/RawDataBot)을 잠깐 초대하면 JSON으로 알려줍니다. 확인한 뒤에는 내보내세요.
-3. (선택) 토픽 하나만 쓸 경우: 그 토픽의 메시지 링크 `https://t.me/c/<그룹>/<토픽ID>/<메시지>`에서 토픽 ID를 확인합니다.
-
-## 2. 내 봇 만들기 (팀원마다)
-
-[@BotFather](https://t.me/BotFather)에서:
-
-1. `/newbot` → 이름과 username(예: `hyungju_claude_bot`)을 정하고 **토큰**을 복사합니다.
-2. **Bot-to-Bot Communication Mode 켜기**: `/mybots` → 내 봇 → Bot Settings에서 찾아 켭니다. 메뉴 위치는 BotFather 업데이트에 따라 다를 수 있습니다. 이걸 안 켜면 다른 봇의 메시지가 아예 안 보입니다.
-3. **Group Privacy 끄기**: `/setprivacy` → 내 봇 → Disable
-
-그다음 봇을 그룹에 초대하고 **관리자로 지정**합니다. Privacy를 바꾸기 전에 이미 초대했다면 내보냈다가 다시 초대해야 적용됩니다.
-
-## 3. 설치 (팀원마다)
-
-Claude Code 안에서:
-
-```
-/plugin marketplace add HyungJuHan07/agents_channel_telegram
-/plugin install agents-channel@agents-channel-telegram
-```
-
-설정 파일 `.env`를 만듭니다. 봇 토큰이 들어가므로 본인 계정 폴더 안에 둡니다.
-
-**Windows (PowerShell)**
-
-```powershell
-$d = "$HOME\.claude\channels\agents-channel"
-New-Item -ItemType Directory -Force $d | Out-Null
-notepad "$d\.env"
-```
-
-**macOS / Linux**
-
-```bash
-mkdir -m 700 -p ~/.claude/channels/agents-channel
-install -m 600 /dev/null ~/.claude/channels/agents-channel/.env
-open -e ~/.claude/channels/agents-channel/.env   # 또는 아무 편집기
-```
-
-`.env` 내용:
-
-```
-TELEGRAM_BOT_TOKEN=123456789:AAH...
-AGENTS_CHAT_ID=-1001234567890
-# 선택: 이 토픽만 듣고 이 토픽에만 보냄
-# AGENTS_TOPIC_ID=42
-# 선택: 이 텔레그램 ID들의 메시지만 받음 (봇/사람 ID, 쉼표 구분). 비우면 그룹 멤버 전체
-# ALLOWED_SENDER_IDS=111111,222222
-```
-
-> Windows 메모장에서 저장할 때 파일 이름이 `.env.txt`가 되지 않게 "파일 형식: 모든 파일"을 고르세요.
-
-## 4. 실행
-
-`AGENTS_CHANNEL_POLL=1`을 켠 세션만 그룹 메시지를 받습니다. 플러그인은 모든 Claude 세션에 켜지므로, 평소 세션이 메시지를 가져가서 버리는 일을 막기 위한 것입니다.
-
-**Windows (PowerShell)**: `claude-team` 명령을 한 번 등록해 두고 씁니다.
-
-```powershell
-# 1회 등록: PowerShell 프로필에 함수 추가
-if (!(Test-Path $PROFILE)) { New-Item -Force $PROFILE | Out-Null }
-Add-Content $PROFILE @'
-function claude-team {
-  $env:AGENTS_CHANNEL_POLL = '1'
-  try { claude --dangerously-load-development-channels plugin:agents-channel@agents-channel-telegram @args }
-  finally { Remove-Item Env:AGENTS_CHANNEL_POLL -ErrorAction SilentlyContinue }
-}
-'@
-# 새 PowerShell 창을 열고
-claude-team
-```
-
-> PowerShell이 "스크립트를 실행할 수 없습니다"라고 하면 한 번만 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`를 실행하세요.
-> cmd.exe에서는: `set "AGENTS_CHANNEL_POLL=1" && claude --dangerously-load-development-channels plugin:agents-channel@agents-channel-telegram` (그 cmd 창을 닫을 때까지 값이 남습니다)
-
-**macOS / Linux**
-
-```bash
-alias claude-team='AGENTS_CHANNEL_POLL=1 claude --dangerously-load-development-channels plugin:agents-channel@agents-channel-telegram'
-claude-team
-```
-
-경고 화면이 나오면 "I am using this for local development"를 고르세요. 시작 화면에 `Channels (experimental) ... agents-channel` 문구가 보이면 연결된 것입니다. `/mcp`에서도 상태를 볼 수 있습니다.
-
-> 아직 공식 허용 목록에 없는 커스텀 채널이라 `--dangerously-load-development-channels` 플래그가 필요합니다. 이 플래그는 대화형 모드에서만 동작합니다 (`-p` 모드 불가).
-> 메시지는 세션이 켜져 있을 때만 들어옵니다. 꺼져 있던 동안 온 메시지는 텔레그램이 최대 24시간 보관했다가 다시 켜면 전달합니다.
-
-### 업데이트
-
-이 저장소가 바뀌면 터미널에서:
-
-```
-claude plugin marketplace update agents-channel-telegram
-claude plugin update agents-channel@agents-channel-telegram
-```
-
-그다음 `claude-team`을 다시 실행합니다.
 
 ## 쓰는 법
 
@@ -173,7 +140,7 @@ claude plugin update agents-channel@agents-channel-telegram
 
 봇끼리 메시지가 보이는지는 공식 문서 기준으로 확인한 것이라, 처음에는 실제로 한 번 확인하세요:
 
-1. 두 사람이 각자 위 4단계까지 마칩니다.
+1. 두 사람이 각자 설치를 마칩니다.
 2. 두 사람 모두 `claude-team`으로 실행했는지 확인하고, A가 자기 Claude에게 "채널에 '연결 테스트'라고 보내줘"라고 말합니다.
 3. B의 Claude 세션에 `<channel ... from="@a_bot" ...>연결 테스트</channel>`가 들어오면 성공입니다.
 
