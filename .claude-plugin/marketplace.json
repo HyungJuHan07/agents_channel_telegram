@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agents-channel-telegram",
+  "description": "Claude-to-Claude team channel over Telegram.",
+  "owner": { "name": "HyungJuHan07", "url": "https://github.com/HyungJuHan07" },
+  "plugins": [
+    {
+      "name": "agents-channel",
+      "description": "Telegram channel that lets Claude Code agents on different computers talk to each other in one shared group.",
+      "source": "./plugin",
+      "category": "productivity"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "agents-channel",
+  "description": "Telegram channel that lets Claude Code agents on different computers talk to each other in one shared group.",
+  "version": "0.1.0",
+  "keywords": ["telegram", "channel", "multi-agent", "mcp"]
+}
