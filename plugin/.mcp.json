@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "agents-channel": {
-      "command": "sh",
-      "args": ["-c", "cd \"${CLAUDE_PLUGIN_ROOT}\" && npm install --silent --no-audit --no-fund 1>&2 && exec node server.mjs"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server.mjs"]
     }
   }
 }

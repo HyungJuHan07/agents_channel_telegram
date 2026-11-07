@@ -5,7 +5,10 @@ import { createServer } from 'node:http'
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
+
+const WIN = process.platform === 'win32' // no POSIX modes; symlinks need admin
 
 const CHAT = -1001
 const ME = { id: 10, is_bot: true, username: 'alice_bot', first_name: 'Alice' }
@@ -36,12 +39,13 @@ const tg = createServer(async (req, res) => {
 await new Promise(r => tg.once('listening', r))
 
 const state = mkdtempSync(join(tmpdir(), 'agents-channel-'))
-writeFileSync(join(state, '.env'), `TELEGRAM_BOT_TOKEN=T:secret\nAGENTS_CHAT_ID=${CHAT}\n`)
+// Written the way Windows PowerShell 5.1 `>` does it: UTF-16LE + BOM, CRLF.
+writeFileSync(join(state, '.env'), Buffer.from('\ufeffTELEGRAM_BOT_TOKEN=T:secret\r\nAGENTS_CHAT_ID=' + CHAT + '\r\n', 'utf16le'))
 const client = new Client({ name: 'test', version: '0' })
 const notes = []
 client.fallbackNotificationHandler = async n => { notes.push(n) }
 await client.connect(new StdioClientTransport({
-  command: 'node', args: [new URL('./server.mjs', import.meta.url).pathname],
+  command: process.execPath, args: [fileURLToPath(new URL('./server.mjs', import.meta.url))],
   env: { ...process.env, AGENTS_CHANNEL_POLL: '1', AGENTS_CHANNEL_STATE_DIR: state, TELEGRAM_API_BASE: `http://127.0.0.1:${tg.address().port}` },
   stderr: 'ignore',
 }))
@@ -50,7 +54,7 @@ const sends = since => calls.slice(since).filter(c => c.method.startsWith('send'
 const until = async f => { for (let i = 0; i < 100 && !f(); i++) await new Promise(r => setTimeout(r, 30)); assert.ok(f(), 'timed out') }
 
 assert.deepEqual((await client.listTools()).tools.map(t => t.name), ['send', 'download', 'members'])
-assert.equal(statSync(state).mode & 0o777, 0o700, 'state dir is owner-only')
+if (!WIN) assert.equal(statSync(state).mode & 0o777, 0o700, 'state dir is owner-only')
 
 // --- inbound
 queue.push(
@@ -102,8 +106,10 @@ for (const bad of [join(state, '.env'), join(state, '..', 'agents-channel-outsid
   r = await call('send', { files: [bad] })
   assert.ok(r.isError && /only files inside/.test(r.content[0].text), `refused: ${bad}`)
 }
-symlinkSync('/dev/zero', join(state, 'outbox', 'zero'))
-assert.ok((await call('send', { files: [join(state, 'outbox', 'zero')] })).isError, 'symlink out of the outbox is refused')
+if (!WIN) {
+  symlinkSync('/dev/zero', join(state, 'outbox', 'zero'))
+  assert.ok((await call('send', { files: [join(state, 'outbox', 'zero')] })).isError, 'symlink out of the outbox is refused')
+}
 
 const f = join(state, 'outbox', 'handoff.txt'); writeFileSync(f, 'hello')
 n = calls.length
@@ -116,7 +122,7 @@ assert.ok(sends(n)[0].body.includes('hello') && sends(n)[0].body.includes('@bob_
 r = await call('download', { file_id: 'F1' })
 const path = r.content[0].text
 assert.ok(existsSync(path) && readFileSync(path, 'utf8') === 'FILEBYTES')
-assert.equal(statSync(path).mode & 0o777, 0o600)
+if (!WIN) assert.equal(statSync(path).mode & 0o777, 0o600)
 assert.match((await call('members', {})).content[0].text, /@bob_bot/, 'other agent bots are listed')
 
 // --- rate limit refuses up front
