@@ -10,56 +10,72 @@
  *
  * Validates the token, saves .env, installs the `claude-team` launcher next to the
  * `claude` binary, detects the group the bot was added to, and checks the bot's rights.
- * Output lines: "OK ...", "ACTION ..." (a human must do this in Telegram), "ERROR ...".
+ * Output lines: "OK ...", "NOTE ...", "ACTION ..." (a human must do this in Telegram), "ERROR ...".
  * Exit code 0 = ready, 2 = waiting on a human ACTION, 1 = error.
  */
 import { existsSync, writeFileSync, chmodSync } from 'node:fs'
 import { join, delimiter } from 'node:path'
+import { homedir } from 'node:os'
 import { parseArgs } from 'node:util'
-import { ENV_FILE, STATE_DIR, readEnvFile, writeEnvFile, botApi } from './config.mjs'
+import { fileURLToPath } from 'node:url'
+import { ENV_FILE, STATE_DIR, INBOX, OUTBOX, readEnvFile, writeEnvFile, botApi } from './config.mjs'
 
 const { values: opt } = parseArgs({ options: { token: { type: 'string' }, chat: { type: 'string' }, wait: { type: 'string', default: '0' } } })
 const env = readEnvFile()
 const actions = []
 const ok = s => console.log('OK     ' + s)
+const note = s => console.log('NOTE   ' + s)
 const action = s => { actions.push(s); console.log('ACTION ' + s) }
 const fail = s => { console.log('ERROR  ' + s); process.exit(1) }
+const win = process.platform === 'win32'
 const CHANNEL = 'plugin:agents-channel@agents-channel-telegram'
-const RERUN = 'node setup.mjs --wait 120'
-const ADD_BOT = u => `add @${u} to the team group as an administrator (group settings → Administrators → Add Admin). If it is already in the group, send any message in the group so setup can see it`
+const TOOLS = 'mcp__plugin_agents-channel_agents-channel' // all of this plugin's tools
+const RERUN = `node "${fileURLToPath(import.meta.url)}" --wait 120`
+const ADD_BOT = u => `add @${u} to the team group as an administrator (group settings → Administrators → Add Admin; if you can't, send "@${u}" to the group owner and ask them to add it as admin). If it is already in the group, send any message in the group so setup can see it`
 
 // 1. token
-const token = (opt.token ?? env.TELEGRAM_BOT_TOKEN ?? '').trim()
-if (!/^\d+:[\w-]+$/.test(token)) fail('no valid bot token. Get one from @BotFather (/newbot) and run: node setup.mjs --token <TOKEN>')
+const token = (opt.token ?? env.AGENTS_BOT_TOKEN ?? '').trim()
+if (!/^\d+:[\w-]+$/.test(token)) fail(`no valid bot token. Get one from @BotFather (/newbot) and run: node "${fileURLToPath(import.meta.url)}" --token <TOKEN>`)
 const tg = botApi(token)
 let me
 try { me = await tg('getMe') } catch (e) { fail(e.code === 401 ? 'Telegram rejected the token (401). Copy it again from @BotFather.' : `cannot reach Telegram: ${e.message}`) }
-writeEnvFile({ ...env, TELEGRAM_BOT_TOKEN: token })
+await tg('deleteWebhook').catch(() => {}) // a leftover webhook makes every getUpdates fail with 409
+writeEnvFile({ ...env, AGENTS_BOT_TOKEN: token })
 ok(`bot @${me.username} (id ${me.id}); token saved to ${ENV_FILE}`)
 if (!me.can_read_all_group_messages)
   action(`@BotFather → /setprivacy → @${me.username} → Disable. (If the bot is already in the group, remove it and add it again afterwards.)`)
-console.log(`NOTE   Bot-to-Bot Communication Mode can't be checked from the API: make sure it is enabled for @${me.username} in @BotFather (/mybots → @${me.username} → Bot Settings).`)
+note(`Bot-to-Bot Communication Mode can't be checked from the API: make sure it is enabled for @${me.username} in @BotFather (/mybots → @${me.username} → Bot Settings).`)
 
-// 2. launcher: put `claude-team` next to `claude`, which is already on PATH.
+// 2. launcher: put `claude-team` next to `claude`, which is already on PATH. It turns on polling,
+// loads the channel, pre-approves this plugin's tools, and adds the outbox/inbox as working dirs
+// so staging a file for a teammate doesn't need a separate approval each time.
 function installLauncher() {
-  const win = process.platform === 'win32'
   const dirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
   const dir = dirs.find(d => (win ? ['.exe', '.cmd', ''] : ['']).some(e => existsSync(join(d, 'claude' + e))))
+  if (!dir) return action('the Claude Code CLI (`claude`) is not on PATH (the VS Code extension and desktop app do not provide it). Install it — Windows PowerShell: irm https://claude.ai/install.ps1 | iex ; macOS/Linux: curl -fsSL https://claude.ai/install.sh | bash — open a new terminal, then re-run setup.')
+  // Paths via %USERPROFILE%/$HOME when possible: a .cmd file is read in the console code page,
+  // so a literal Korean/accented user name would break inside it.
+  const isDefault = STATE_DIR === join(homedir(), '.agents-channel')
+  const p = (sub, style) => isDefault ? (style === 'cmd' ? `%USERPROFILE%\\.agents-channel\\${sub}` : `$HOME/.agents-channel/${sub}`) : join(STATE_DIR, sub)
+  // `--flag=value` form: these flags take several values and would otherwise swallow a prompt passed after them.
+  const args = s => `--dangerously-load-development-channels=${CHANNEL} --allowedTools=${TOOLS} --add-dir="${p('outbox', s)}" --add-dir="${p('inbox', s)}"`
   const files = {
-    'claude-team': `#!/bin/sh\nAGENTS_CHANNEL_POLL=1 exec claude --dangerously-load-development-channels ${CHANNEL} "$@"\n`,
-    ...(win ? { 'claude-team.cmd': `@echo off\r\nsetlocal\r\nset "AGENTS_CHANNEL_POLL=1"\r\ncall claude --dangerously-load-development-channels ${CHANNEL} %*\r\n` } : {}),
+    'claude-team': `#!/bin/sh\nAGENTS_CHANNEL_POLL=1 exec claude ${args('sh')} "$@"\n`,
+    ...(win ? { 'claude-team.cmd': `@echo off\r\nsetlocal\r\nset "AGENTS_CHANNEL_POLL=1"\r\ncall claude ${args('cmd')} %*\r\n` } : {}),
   }
-  for (const target of [dir, STATE_DIR].filter(Boolean)) {
+  for (const target of [dir, STATE_DIR]) {
     try {
       for (const [name, body] of Object.entries(files)) { writeFileSync(join(target, name), body); chmodSync(join(target, name), 0o755) }
-      if (target === dir) return ok(`launcher installed: ${join(dir, win ? 'claude-team.cmd' : 'claude-team')} → start the team session with: claude-team`)
+      if (target === dir) { ok(`launcher installed: ${join(dir, win ? 'claude-team.cmd' : 'claude-team')}`); return 'claude-team' }
       // Works, just not on PATH: not a blocker, so a NOTE (an ACTION would never clear on re-run).
-      return console.log(`NOTE   could not write next to claude; start the team session with the full path: "${join(STATE_DIR, win ? 'claude-team.cmd' : 'claude-team')}"`)
+      const full = join(STATE_DIR, win ? 'claude-team.cmd' : 'claude-team')
+      note(`could not write next to claude (${dir}); the launcher is at ${full}`)
+      return win ? `& "${full}"   (PowerShell; in cmd.exe: "${full}")` : `"${full}"`
     } catch {}
   }
-  fail(`could not write the launcher anywhere`)
+  fail('could not write the launcher anywhere')
 }
-installLauncher()
+const launch = installLauncher()
 
 // 3. group: explicit, saved, or detected from the "bot was added" update.
 async function detectGroup(seconds) {
@@ -114,11 +130,12 @@ if (chat.type === 'supergroup') {
 } else {
   // Not saved: turning on Topics gives the group a new id, which a re-run auto-detects.
   writeEnvFile({ ...readEnvFile(), AGENTS_CHAT_ID: '' })
-  action(`group "${chat.title}" is a basic group: turn on Topics in the group settings (it becomes a supergroup with a new id), then send any message in the group and re-run: ${RERUN}`)
+  action(`group "${chat.title}" is a basic group: the group owner must turn on Topics in the group settings (it becomes a supergroup with a new id); then send any message in the group and re-run: ${RERUN}`)
 }
-if (member.status !== 'administrator' && member.status !== 'creator') action(`make @${me.username} an administrator of "${chat.title}" (group settings → Administrators → Add Admin).`)
+if (member.status !== 'administrator' && member.status !== 'creator')
+  action(`@${me.username} must be an administrator of "${chat.title}". Usually only the group owner can do this: send them "@${me.username}" and ask them to promote it (group settings → Administrators → Add Admin).`)
 
 console.log(actions.length
   ? `\nNOT READY: ${actions.length} action(s) above, then re-run: ${RERUN}`
-  : `\nREADY. Open a new terminal and run: claude-team  (accept the "local development" prompt once)`)
+  : `\nREADY. Open a new terminal, go to your project folder (cd <project>), and run: ${launch}\n(The "local development" warning appears on every launch: choose option 1.)`)
 process.exit(actions.length ? 2 : 0)

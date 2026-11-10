@@ -3,8 +3,9 @@ import { readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const STATE_DIR = process.env.AGENTS_CHANNEL_STATE_DIR
-  ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'channels', 'agents-channel')
+// Outside ~/.claude on purpose: Claude Code guards that folder, so staging a file in the outbox
+// there would need a human approval every single time.
+export const STATE_DIR = process.env.AGENTS_CHANNEL_STATE_DIR ?? join(homedir(), '.agents-channel')
 export const INBOX = join(STATE_DIR, 'inbox')
 export const OUTBOX = join(STATE_DIR, 'outbox')
 export const ENV_FILE = join(STATE_DIR, '.env')
@@ -43,6 +44,8 @@ export const botApi = token => async function tg(method, body) {
   const isForm = body instanceof FormData
   const res = await fetch(`${API}/bot${token}/${method}`, {
     method: 'POST',
+    // A long-poll socket that died during laptop sleep / Wi-Fi switch must not hang forever.
+    signal: AbortSignal.timeout(body?.timeout ? (body.timeout + 15) * 1000 : isForm ? 300_000 : 60_000),
     headers: isForm ? undefined : { 'content-type': 'application/json' },
     body: isForm ? body : JSON.stringify(body ?? {}),
   })
